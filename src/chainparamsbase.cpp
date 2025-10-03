@@ -1,102 +1,383 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2015 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <chainparamsbase.h>
+#include <chainparams.h>
+#include <consensus/merkle.h>
 
 #include <tinyformat.h>
 #include <util.h>
+#include <utilstrencodings.h>
 
 #include <assert.h>
+#include <limits> // NEW: for INT_MAX
 
-const std::string CBaseChainParams::MAIN = "main";
-const std::string CBaseChainParams::TESTNET = "test";
-const std::string CBaseChainParams::REGTEST = "regtest";
+#include <chainparamsseeds.h>
 
-void AppendParamsHelpMessages(std::string& strUsage, bool debugHelp)
+static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesisOutputScript, uint32_t nTime, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
-    strUsage += HelpMessageGroup(_("Chain selection options:"));
-    strUsage += HelpMessageOpt("-testnet", _("Use the test chain"));
-    if (debugHelp) {
-        strUsage += HelpMessageOpt("-regtest", "Enter regression test mode, which uses a special chain in which blocks can be solved instantly. "
-                                   "This is intended for regression testing tools and app development.");
-    }
+    CMutableTransaction txNew;
+    txNew.nVersion = 1;
+    txNew.vin.resize(1);
+    txNew.vout.resize(1);
+    txNew.vin[0].scriptSig = CScript() << 486604799 << CScriptNum(4) << std::vector<unsigned char>((const unsigned char*)pszTimestamp, (const unsigned char*)pszTimestamp + strlen(pszTimestamp));
+    txNew.vout[0].nValue = genesisReward;
+    txNew.vout[0].scriptPubKey = genesisOutputScript;
+
+    CBlock genesis;
+    genesis.nTime    = nTime;
+    genesis.nBits    = nBits;
+    genesis.nNonce   = nNonce;
+    genesis.nVersion = nVersion;
+    genesis.vtx.push_back(MakeTransactionRef(std::move(txNew)));
+    genesis.hashPrevBlock.SetNull();
+    genesis.hashMerkleRoot = BlockMerkleRoot(genesis);
+    return genesis;
+}
+
+/**
+ * Build the genesis block. Note that the output of its generation
+ * transaction cannot be spent since it did not originally exist in the
+ * database.
+ *
+ * CBlock(hash=000000000019d6, ver=1, hashPrevBlock=00000000000000, hashMerkleRoot=4a5e1e, nTime=1231006505, nBits=1d00ffff, nNonce=2083236893, vtx=1)
+ *   CTransaction(hash=4a5e1e, ver=1, vin.size=1, vout.size=1, nLockTime=0)
+ *     CTxIn(COutPoint(000000, -1), coinbase 04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73)
+ *     CTxOut(nValue=50.00000000, scriptPubKey=0x5F1DF16B2B704C8A578D0B)
+ *   vMerkleTree: 4a5e1e
+ */
+static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
+{
+    const char* pszTimestamp = "If this post gets 30000 upvotes I will make a garlic bread cryptocurrency called garlicoin";
+    const CScript genesisOutputScript = CScript() << ParseHex("696984710fa689ad5023690c80f3a49c8f13f8d45b8c857fbcbc8bc4a8e4d3eb4b10f4d4604fa08dce601aaf0f470216fe1b51850b4acf21b179c45070ac7b03a9") << OP_CHECKSIG;
+    return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTime, nNonce, nBits, nVersion, genesisReward);
+}
+
+void CChainParams::UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout)
+{
+    consensus.vDeployments[d].nStartTime = nStartTime;
+    consensus.vDeployments[d].nTimeout = nTimeout;
 }
 
 /**
  * Main network
  */
-class CBaseMainParams : public CBaseChainParams
-{
+class CMainParams : public CChainParams {
 public:
-    CBaseMainParams()
-    {
-        nRPCPort = 42068;
+    CMainParams() {
+        strNetworkID = "main";
+        consensus.nSubsidyHalvingInterval = 690000;
+        consensus.BIP16Height = 0;
+        consensus.BIP34Height = 0;
+        consensus.BIP34Hash = uint256S("0x2ada80bf415a89358d697569c96eb98cdbf4c3b8878ac5722c01284492e27228");
+        consensus.BIP65Height = 0; // bab3041e...
+        consensus.BIP66Height = 0; // 7aceee0...
+        consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        consensus.nPowTargetTimespan = 60 * 60; // every hour - now irrelevant due to Dark Gravity Wave
+        consensus.nPowTargetSpacing = 40; // 60 seconds
+        consensus.fPowAllowMinDifficultyBlocks = false;
+        consensus.fPowNoRetargeting = false;
+        consensus.nRuleChangeActivationThreshold = 6048; // 75% of 8064
+        consensus.nMinerConfirmationWindow = 8064; // nPowTargetTimespan / nPowTargetSpacing * 4
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 1199145601; // January 1, 2008
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = 1230767999; // December 31, 2008
+
+        // Deployment of BIP68, BIP112, and BIP113.
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].bit = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nStartTime = 1515925817;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nTimeout = 1547424000;
+
+        // Deployment of SegWit (BIP141, BIP143, and BIP147)
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].bit = 1;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = 1515925817;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = 1547424000;
+
+        // The best chain should have at least this much work.
+        consensus.nMinimumChainWork = uint256S("0x00000000000000000000000000000000000000000000000001f73f789d0ab866");
+
+        // By default assume that the signatures in ancestors of this block are valid.
+        consensus.defaultAssumeValid = uint256S("0xa61ad18684db9698fb11c93c2e139eb5966cdee3bddceba40d9aaf890e5088e8");
+
+        /**
+         * Message start chars / default ports / pruning
+         */
+        pchMessageStart[0] = 0xd2;
+        pchMessageStart[1] = 0xc6;
+        pchMessageStart[2] = 0xb6;
+        pchMessageStart[3] = 0xdb;
+        nDefaultPort = 42069;
+        nPruneAfterHeight = 100000;
+
+        // Genesis
+        genesis = CreateGenesisBlock(1515925970, 811793, 0x1e0ffff0, 1, 50 * COIN);
+        consensus.hashGenesisBlock = genesis.GetHash();
+        assert(consensus.hashGenesisBlock == uint256S("0x2ada80bf415a89358d697569c96eb98cdbf4c3b8878ac5722c01284492e27228"));
+        assert(genesis.hashMerkleRoot == uint256S("0x5f32b33db6dcab182dfad55b3d04b2978c1598cf82519835e000dd77e37f3aa8"));
+
+        // DNS seeds
+        vSeeds.emplace_back("dnsseed.rshaw.space");
+        vSeeds.emplace_back("dnsseed.garli.co.in");
+        vSeeds.emplace_back("dnsseed.garlicoin.network");
+
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,38);
+        base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,50);
+        base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,176);
+        base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x88, 0xB2, 0x1E};
+        base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x88, 0xAD, 0xE4};
+
+        bech32_hrp = "grlc";
+
+        vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_main, pnSeed6_main + ARRAYLEN(pnSeed6_main));
+
+        fDefaultConsistencyChecks = false;
+        fRequireStandard = true;
+        fMineBlocksOnDemand = false;
+
+        checkpointData = {
+            {
+                {  0,      uint256S("0x2ada80bf415a89358d697569c96eb98cdbf4c3b8878ac5722c01284492e27228")},
+                {  10000,  uint256S("0xe3d63206131fbdc8e60be5625d3bf9168a8b0ebeb04332e39e9ff8f0c541eaf4")},
+                {  50000,  uint256S("0x8edf265583f0277f634adc86d7a60b240e7a238f714054e2b7b0f7fdaee96411")},
+                {  150000, uint256S("0xc9f34878e0b733bc48def84e80fd6b252fcdfff8178ea89770c106280f82c6a6")},
+                {  200000, uint256S("0x566b5c09f86ef4baa9198900f98671c333d16da9aeba7ea094fc82823de9e575")},
+                {  275000, uint256S("0xaee6f2165bf257c4454dac271e6f7fa1d1cb62b65d288d625b06b8343e38ae2c")},
+                {  296069, uint256S("0x787f605104c2611c05563bb0200e81de9c37fec28b27852b08ccfa9983d21fd8")},
+            }
+        };
+
+        chainTxData = ChainTxData{
+            // Data as of block db42d00... (height 1259851).
+            1527712501, // last known timestamp
+            884061,     // total txs
+            0.05        // est. tps after that
+        };
+
+        // ----------------------------
+        // NEW: Proof-of-Agreement (SCP-like) parameters
+        // ----------------------------
+        consensus.poa.nActivationHeight = std::numeric_limits<int>::max(); // DO NOT ACTIVATE ON MAINNET YET
+        consensus.poa.nSlotDurationSeconds = 10;                            // target 10s "ledger close"
+        consensus.poa.nQuorumThresholdPercent = 67;                         // 67% weight threshold
+
+        // TODO: Replace these placeholder keys with REAL Ed25519 validator pubkeys (32 bytes each).
+        consensus.poa.vValidatorPubKeys = {
+            ParseHex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            ParseHex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            ParseHex("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+        };
+        // Optional weights: if empty, weight=1 for all. If provided, must match size of vValidatorPubKeys.
+        consensus.poa.vValidatorWeights = {1, 1, 1};
     }
 };
 
 /**
  * Testnet (v3)
  */
-class CBaseTestNetParams : public CBaseChainParams
-{
+class CTestNetParams : public CChainParams {
 public:
-    CBaseTestNetParams()
-    {
-        nRPCPort = 42070;
-        strDataDir = "testnet4";
+    CTestNetParams() {
+        strNetworkID = "test";
+        consensus.nSubsidyHalvingInterval = 690000;
+        consensus.BIP34Height = 76;
+        consensus.BIP34Hash = uint256S("8075c771ed8b495ffd943980a95f702ab34fce3c8c54e379548bda33cc8c0573");
+        consensus.BIP65Height = 76;
+        consensus.BIP66Height = 76;
+        consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        consensus.nPowTargetTimespan = 60 * 60; // DGW irrelevant
+        consensus.nPowTargetSpacing = 40;       // 40 seconds
+        consensus.fPowAllowMinDifficultyBlocks = true;
+        consensus.fPowNoRetargeting = false;
+        consensus.nRuleChangeActivationThreshold = 1512; // 75% for testchains
+        consensus.nMinerConfirmationWindow = 2016;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 1199145601;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = 1230767999;
+
+        // CSV, SegWit
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].bit = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nStartTime = 1483228800;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nTimeout = 1517356801;
+
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].bit = 1;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = 1483228800;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = 1517356801;
+
+        consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000000000000000000");
+        consensus.defaultAssumeValid = uint256S("0xad8ff6c2f5580d2b50bd881e11312425ea84fa99f322bf132beb722f97971bba"); //153490
+
+        pchMessageStart[0] = 0xfd;
+        pchMessageStart[1] = 0xd2;
+        pchMessageStart[2] = 0xc8;
+        pchMessageStart[3] = 0xf2;
+        nDefaultPort = 42075;
+        nPruneAfterHeight = 1000;
+
+        // Genesis (testnet)
+        genesis = CreateGenesisBlock(1516729643, 1047651, 0x1e0ffff0, 1, 50 * COIN);
+        consensus.hashGenesisBlock = genesis.GetHash();
+        assert(consensus.hashGenesisBlock == uint256S("0xb25004ec2dc27689999f9ee14856ee0464d7f73f3fae3cf43c1d40f89c141aea"));
+        assert(genesis.hashMerkleRoot == uint256S("0x5f32b33db6dcab182dfad55b3d04b2978c1598cf82519835e000dd77e37f3aa8"));
+
+        vFixedSeeds.clear();
+        vSeeds.clear();
+        vSeeds.emplace_back("dnsseed-testnet.rshaw.space");
+
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,111);
+        base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,58);
+        base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);
+        base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
+        base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
+
+        bech32_hrp = "tgrlc";
+
+        vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_test, pnSeed6_test + ARRAYLEN(pnSeed6_test));
+
+        fDefaultConsistencyChecks = false;
+        fRequireStandard = false;
+        fMineBlocksOnDemand = false;
+
+        checkpointData = (CCheckpointData) {
+            {
+                {0, uint256S("0xb25004ec2dc27689999f9ee14856ee0464d7f73f3fae3cf43c1d40f89c141aea")},
+            }
+        };
+
+        chainTxData = ChainTxData{
+            1516729643,
+            1,
+            0.00
+        };
+
+        // ----------------------------
+        // NEW: PoA on TESTNET (enable early for trials)
+        // ----------------------------
+        consensus.poa.nActivationHeight = 210000;            // <<< pick a safe future testnet height
+        consensus.poa.nSlotDurationSeconds = 10;
+        consensus.poa.nQuorumThresholdPercent = 67;
+        consensus.poa.vValidatorPubKeys = {
+            ParseHex("1111111111111111111111111111111111111111111111111111111111111111"),
+            ParseHex("2222222222222222222222222222222222222222222222222222222222222222"),
+            ParseHex("3333333333333333333333333333333333333333333333333333333333333333")
+        };
+        consensus.poa.vValidatorWeights = {1, 1, 1};
     }
 };
 
-/*
+/**
  * Regression test
  */
-class CBaseRegTestParams : public CBaseChainParams
-{
+class CRegTestParams : public CChainParams {
 public:
-    CBaseRegTestParams()
-    {
-        nRPCPort = 42070;
-        strDataDir = "regtest";
+    CRegTestParams() {
+        strNetworkID = "regtest";
+        consensus.nSubsidyHalvingInterval = 150;
+        consensus.BIP16Height = 0; // always enforce P2SH BIP16 on regtest
+        consensus.BIP34Height = 100000000; // far future
+        consensus.BIP34Hash = uint256();
+        consensus.BIP65Height = 1351; // used in rpc tests
+        consensus.BIP66Height = 1251; // used in rpc tests
+        consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        consensus.nPowTargetTimespan = 60 * 60;
+        consensus.nPowTargetSpacing = 40;
+        consensus.fPowAllowMinDifficultyBlocks = true;
+        consensus.fPowNoRetargeting = true;
+        consensus.nRuleChangeActivationThreshold = 108; // 75%
+        consensus.nMinerConfirmationWindow = 144;       // fast
+
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].bit = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nStartTime = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].bit = 1;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+
+        consensus.nMinimumChainWork = uint256{};
+        consensus.defaultAssumeValid = uint256{};
+
+        pchMessageStart[0] = 0xfa;
+        pchMessageStart[1] = 0xbf;
+        pchMessageStart[2] = 0xb5;
+        pchMessageStart[3] = 0xda;
+        nDefaultPort = 19444;
+        nPruneAfterHeight = 1000;
+
+        // Genesis (regtest)
+        genesis = CreateGenesisBlock(1662619162, 1, 0x207fffff, 1, 50 * COIN);
+        consensus.hashGenesisBlock = genesis.GetHash();
+        assert(consensus.hashGenesisBlock == uint256S("0xf7a36e5f2d7328c50c2341e7b4529bbf50e91b44cbddcd0d617d0c95c651d1f3"));
+        assert(genesis.hashMerkleRoot == uint256S("0x5f32b33db6dcab182dfad55b3d04b2978c1598cf82519835e000dd77e37f3aa8"));
+
+        vFixedSeeds.clear(); // no fixed seeds
+        vSeeds.clear();      // no DNS seeds
+
+        fDefaultConsistencyChecks = true;
+        fRequireStandard = false;
+        fMineBlocksOnDemand = true;
+
+        checkpointData = {
+            {
+                {0, uint256S("f7a36e5f2d7328c50c2341e7b4529bbf50e91b44cbddcd0d617d0c95c651d1f3")},
+            }
+        };
+
+        chainTxData = ChainTxData{
+            0,
+            0,
+            0
+        };
+
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,111);
+        base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,58);
+        base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);
+        base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
+        base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
+
+        bech32_hrp = "rgrlc";
+
+        // ----------------------------
+        // NEW: PoA on REGTEST (activate immediately for tests)
+        // ----------------------------
+        consensus.poa.nActivationHeight = 1; // activate PoA from the second block onward
+        consensus.poa.nSlotDurationSeconds = 2;
+        consensus.poa.nQuorumThresholdPercent = 67;
+        consensus.poa.vValidatorPubKeys = {
+            ParseHex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            ParseHex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        };
+        consensus.poa.vValidatorWeights = {1, 1};
     }
 };
 
-static std::unique_ptr<CBaseChainParams> globalChainBaseParams;
+static std::unique_ptr<CChainParams> globalChainParams;
 
-const CBaseChainParams& BaseParams()
-{
-    assert(globalChainBaseParams);
-    return *globalChainBaseParams;
+const CChainParams &Params() {
+    assert(globalChainParams);
+    return *globalChainParams;
 }
 
-std::unique_ptr<CBaseChainParams> CreateBaseChainParams(const std::string& chain)
+std::unique_ptr<CChainParams> CreateChainParams(const std::string& chain)
 {
     if (chain == CBaseChainParams::MAIN)
-        return std::unique_ptr<CBaseChainParams>(new CBaseMainParams());
+        return std::unique_ptr<CChainParams>(new CMainParams());
     else if (chain == CBaseChainParams::TESTNET)
-        return std::unique_ptr<CBaseChainParams>(new CBaseTestNetParams());
+        return std::unique_ptr<CChainParams>(new CTestNetParams());
     else if (chain == CBaseChainParams::REGTEST)
-        return std::unique_ptr<CBaseChainParams>(new CBaseRegTestParams());
-    else
-        throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
+        return std::unique_ptr<CChainParams>(new CRegTestParams());
+    throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
 }
 
-void SelectBaseParams(const std::string& chain)
+void SelectParams(const std::string& network)
 {
-    globalChainBaseParams = CreateBaseChainParams(chain);
+    SelectBaseParams(network);
+    globalChainParams = CreateChainParams(network);
 }
 
-std::string ChainNameFromCommandLine()
+void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout)
 {
-    bool fRegTest = gArgs.GetBoolArg("-regtest", false);
-    bool fTestNet = gArgs.GetBoolArg("-testnet", false);
-
-    if (fTestNet && fRegTest)
-        throw std::runtime_error("Invalid combination of -regtest and -testnet.");
-    if (fRegTest)
-        return CBaseChainParams::REGTEST;
-    if (fTestNet)
-        return CBaseChainParams::TESTNET;
-    return CBaseChainParams::MAIN;
+    globalChainParams->UpdateVersionBitsParameters(d, nStartTime, nTimeout);
 }
