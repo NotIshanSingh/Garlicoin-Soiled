@@ -1,60 +1,61 @@
-#ifndef BLOCK_H
-#define BLOCK_H
+#ifndef BITCOIN_PRIMITIVES_BLOCK_H
+#define BITCOIN_PRIMITIVES_BLOCK_H
 
-#include <vector>
-#include <iostream>
-#include <string>
 #include <stdint.h>
+#include <vector>
+#include <string>
+#include <sstream>
+#include <assert.h>
 #include <serialize.h>
-#include <hash.h>
-#include <primitives/transaction.h>
+#include <chainparams.h>
 
 class CBlockHeader {
 public:
-    // Existing fields for block header
     int nVersion;
     uint256 hashPrevBlock;
     uint256 hashMerkleRoot;
     uint32_t nTime;
     uint32_t nBits;
     uint32_t nNonce;
+    // New: Quorum Certificate field (QC) to prove agreement for PoA
+    std::vector<unsigned char> qc; // The QC signature or other data structure
 
-    // New: QC (quorum certificate) field for PoA
-    std::vector<unsigned char> qc;
+    ADD_SERIALIZE_METHODS;
 
-    // Helper method: Get value hash (signers sign this)
+    CBlockHeader() : nVersion(1), nTime(0), nBits(0), nNonce(0) { }
+    
+    uint256 GetHash() const;
     uint256 GetValueHash() const;
 
-    // Serialization method for block header
-    template <typename Stream, typename Operation>
-    void Serialize(Stream& s, Operation ser_action) {
-        READWRITE(nVersion);
-        READWRITE(hashPrevBlock);
-        READWRITE(hashMerkleRoot);
-        READWRITE(nTime);
-        READWRITE(nBits);
-        READWRITE(nNonce);
-        // Serialize qc (quorum certificate)
-        READWRITE(qc);
+    // Serialize/deserialize excluding qc for hashing
+    template <typename Stream>
+    void SerializeHeaderSansQC(Stream& s) const {
+        s << nVersion << hashPrevBlock << hashMerkleRoot << nTime << nBits << nNonce;
     }
 
-    // Compute block hash (excluding qc)
-    uint256 GetHash() const {
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << nVersion;
-        ss << hashPrevBlock;
-        ss << hashMerkleRoot;
-        ss << nTime;
-        ss << nBits;
-        ss << nNonce;
-        return ss.GetHash();
+    // Serialize/deserialize with qc included (for network transmission)
+    template <typename Stream>
+    void Serialize(Stream& s) const {
+        SerializeHeaderSansQC(s);
+        s << qc;
+    }
+
+    template <typename Stream>
+    void Unserialize(Stream& s) {
+        SerializeHeaderSansQC(s);
+        s >> qc;
     }
 };
 
+// Block represents a full block including the header and transactions.
 class CBlock : public CBlockHeader {
 public:
-    std::vector<CTransactionRef> vtx;  // Transactions in the block
+    std::vector<std::shared_ptr<CTransaction>> vtx;
 
-    // Serialization for the entire block (including transactions)
-    template <typename Stream, typename Operation>
-    void Serialize(Stream& s, Operation ser_action)
+    CBlock() : CBlockHeader() {}
+
+    std::string ToString() const;
+    uint256 GetHash() const;
+};
+
+#endif // BITCOIN_PRIMITIVES_BLOCK_H
