@@ -10,13 +10,14 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <vector>   // NEW: for PoA vectors
 
 namespace Consensus {
 
 enum DeploymentPos
 {
     DEPLOYMENT_TESTDUMMY,
-    DEPLOYMENT_CSV, // Deployment of BIP68, BIP112, and BIP113.
+    DEPLOYMENT_CSV,    // Deployment of BIP68, BIP112, and BIP113.
     DEPLOYMENT_SEGWIT, // Deployment of BIP141, BIP143, and BIP147.
     // NOTE: Also add new deployments to VersionBitsDeploymentInfo in versionbits.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
@@ -44,6 +45,30 @@ struct BIP9Deployment {
 };
 
 /**
+ * Minimal Proof-of-Agreement (SCP-like) configuration.
+ *
+ * - vValidatorPubKeys: Ed25519 public keys (32-byte) serialized as raw bytes.
+ * - nActivationHeight: hard-fork height where PoA replaces PoW checks.
+ * - nSlotDurationSeconds: target "ledger close" period for one slot/height.
+ * - nQuorumThresholdPercent: % of total validator weight required (e.g., 67).
+ * - vValidatorWeights: optional per-validator weights (same order as pubkeys).
+ *
+ * NOTE: Keep this intentionally simple. More advanced quorum-sets (nested
+ * sets / innerSets) can be layered later without breaking this surface.
+ */
+struct PoAConfig {
+    int nActivationHeight{std::numeric_limits<int>::max()}; // default: never activate
+    uint32_t nSlotDurationSeconds{10};                      // default: 10s slots
+    uint32_t nQuorumThresholdPercent{67};                   // default: 67%
+    std::vector<std::vector<unsigned char>> vValidatorPubKeys;
+    std::vector<uint32_t> vValidatorWeights;                // optional; empty = all weight 1
+
+    bool IsActiveAt(int height) const {
+        return height >= nActivationHeight;
+    }
+};
+
+/**
  * Parameters that influence chain consensus.
  */
 struct Params {
@@ -66,11 +91,23 @@ struct Params {
     uint32_t nRuleChangeActivationThreshold;
     uint32_t nMinerConfirmationWindow;
     BIP9Deployment vDeployments[MAX_VERSION_BITS_DEPLOYMENTS];
+
     /** Proof of work parameters */
     int64_t DifficultyAdjustmentInterval() const { return nPowTargetTimespan / nPowTargetSpacing; }
     uint256 nMinimumChainWork;
     uint256 defaultAssumeValid;
+
+    // ----- NEW: Proof-of-Agreement (SCP-like) parameters -----
+    PoAConfig poa;
+
+    // NOTE: The following PoW timing members are referenced by DifficultyAdjustmentInterval()
+    // and exist in the original Params struct in your tree. They are *not* defined in this header
+    // excerpt but must remain available in the translation unit:
+    //   int64_t nPowTargetTimespan;
+    //   int64_t nPowTargetSpacing;
+    // Keep them as-is; PoW code will ignore them after PoA activation.
 };
+
 } // namespace Consensus
 
 #endif // BITCOIN_CONSENSUS_PARAMS_H
